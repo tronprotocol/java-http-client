@@ -15,9 +15,12 @@ import org.tron.api.GrpcAPI.AssetIssueList;
 import org.tron.api.GrpcAPI.BlockLimit;
 import org.tron.api.GrpcAPI.BlockList;
 import org.tron.api.GrpcAPI.BytesMessage;
+import org.tron.api.GrpcAPI.EasyTransferMessage;
+import org.tron.api.GrpcAPI.EasyTransferResponse;
 import org.tron.api.GrpcAPI.EmptyMessage;
 import org.tron.api.GrpcAPI.NodeList;
 import org.tron.api.GrpcAPI.NumberMessage;
+import org.tron.api.GrpcAPI.PaginatedMessage;
 import org.tron.api.GrpcAPI.Return.response_code;
 import org.tron.api.GrpcAPI.TransactionList;
 import org.tron.api.GrpcAPI.WitnessList;
@@ -29,6 +32,8 @@ import org.tron.protos.Contract;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Block;
 import org.tron.protos.Protocol.Transaction;
+import org.tron.protos.Protocol.TransactionInfo;
+import org.tron.protos.Protocol.TransactionSign;
 
 public class GrpcClient {
 
@@ -80,7 +85,27 @@ public class GrpcClient {
       return blockingStubFull.getAccount(request);
     }
   }
+  //Warning: do not invoke this interface provided by others.
+  public Transaction signTransaction(TransactionSign transactionSign) {
+    return blockingStubFull.getTransactionSign(transactionSign);
+  }
+  //Warning: do not invoke this interface provided by others.
+  public byte[] createAdresss(byte[] passPhrase) {
+    BytesMessage.Builder builder = BytesMessage.newBuilder();
+    builder.setValue(ByteString.copyFrom(passPhrase));
 
+    BytesMessage result = blockingStubFull.createAdresss(builder.build());
+    return  result.getValue().toByteArray();
+  }
+  //Warning: do not invoke this interface provided by others.
+  public EasyTransferResponse easyTransfer(byte[] passPhrase, byte[] toAddress, long amount) {
+    EasyTransferMessage.Builder builder = EasyTransferMessage.newBuilder();
+    builder.setPassPhrase(ByteString.copyFrom(passPhrase));
+    builder.setToAddress(ByteString.copyFrom(toAddress));
+    builder.setAmount(amount);
+
+    return blockingStubFull.easyTransfer(builder.build());
+  }
   public Transaction createTransaction(Contract.AccountUpdateContract contract) {
     return blockingStubFull.updateAccount(contract);
   }
@@ -206,6 +231,21 @@ public class GrpcClient {
     }
   }
 
+  public Optional<AssetIssueList> getAssetIssueList(long offset, long limit) {
+    PaginatedMessage.Builder pageMessageBuilder = PaginatedMessage.newBuilder();
+    pageMessageBuilder.setOffset(offset);
+    pageMessageBuilder.setLimit(limit);
+    if (blockingStubSolidity != null) {
+      AssetIssueList assetIssueList = blockingStubSolidity.
+          getPaginatedAssetIssueList(pageMessageBuilder.build());
+      return Optional.ofNullable(assetIssueList);
+    } else {
+      AssetIssueList assetIssueList = blockingStubFull
+          .getPaginatedAssetIssueList(pageMessageBuilder.build());
+      return Optional.ofNullable(assetIssueList);
+    }
+  }
+
   public Optional<NodeList> listNodes() {
     NodeList nodeList = blockingStubFull.listNodes(EmptyMessage.newBuilder().build());
     return Optional.ofNullable(nodeList);
@@ -306,8 +346,15 @@ public class GrpcClient {
   public Optional<Transaction> getTransactionById(String txID) {
     ByteString bsTxid = ByteString.copyFrom(ByteArray.fromHexString(txID));
     BytesMessage request = BytesMessage.newBuilder().setValue(bsTxid).build();
-    Transaction transaction = blockingStubFull.getTransactionById(request);
+    Transaction transaction = blockingStubSolidity.getTransactionById(request);
     return Optional.ofNullable(transaction);
+  }
+
+  public Optional<TransactionInfo> getTransactionInfoById(String txID) {
+    ByteString bsTxid = ByteString.copyFrom(ByteArray.fromHexString(txID));
+    BytesMessage request = BytesMessage.newBuilder().setValue(bsTxid).build();
+    TransactionInfo transactionInfo = blockingStubSolidity.getTransactionInfoById(request);
+    return Optional.ofNullable(transactionInfo);
   }
 
   public Optional<Block> getBlockById(String blockID) {

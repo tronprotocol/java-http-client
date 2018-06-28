@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.Scanner;
+import org.apache.commons.lang3.ArrayUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.tron.api.GrpcAPI.AccountNetMessage;
@@ -25,11 +26,13 @@ import org.tron.api.GrpcAPI.WitnessList;
 import org.tron.common.utils.ByteArray;
 import org.tron.common.utils.Utils;
 import org.tron.core.exception.CancelException;
-import org.tron.keystore.CipherException;
+import org.tron.core.exception.CipherException;
+import org.tron.keystore.StringUtils;
 import org.tron.protos.Contract.AssetIssueContract;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Block;
 import org.tron.protos.Protocol.Transaction;
+import org.tron.protos.Protocol.TransactionInfo;
 import org.tron.walletserver.WalletClient;
 
 public class TestClient {
@@ -37,14 +40,16 @@ public class TestClient {
   private static final Logger logger = LoggerFactory.getLogger("TestClient");
   private Client client = new Client();
 
-  private String inputPassword2Twice() {
-    String password0;
+  private char[] inputPassword2Twice() throws IOException {
+    char[] password0;
     while (true) {
       System.out.println("Please input password.");
       password0 = Utils.inputPassword(true);
       System.out.println("Please input password again.");
-      String password1 = Utils.inputPassword(true);
-      if (password0.equals(password1)) {
+      char[] password1 = Utils.inputPassword(true);
+      boolean flag = Arrays.equals(password0, password1);
+      StringUtils.clear(password1);
+      if (flag) {
         break;
       }
       System.out.println("The passwords do not match, please input again.");
@@ -52,42 +57,53 @@ public class TestClient {
     return password0;
   }
 
-  private String inputPrivateKey() {
-    Scanner in = new Scanner(System.in);
-    String privateKey;
+  private byte[] inputPrivateKey() throws IOException {
+    byte[] temp = new byte[128];
+    byte[] result = null;
     System.out.println("Please input private key.");
     while (true) {
-      String input = in.nextLine().trim();
-      privateKey = input.split("\\s+")[0];
-      if (WalletClient.priKeyValid(privateKey)) {
-        break;
+      int len = System.in.read(temp, 0, temp.length);
+      if (len >= 64) {
+        byte[] privateKey = Arrays.copyOfRange(temp, 0, 64);
+        result = StringUtils.hexs2Bytes(privateKey);
+        StringUtils.clear(privateKey);
+        if (WalletClient.priKeyValid(result)) {
+          break;
+        }
       }
+      StringUtils.clear(result);
       System.out.println("Invalid private key, please input again.");
     }
-    return privateKey;
+    StringUtils.clear(temp);
+    return result;
   }
 
-  private String inputPrivateKey64() {
-    Scanner in = new Scanner(System.in);
+  private byte[] inputPrivateKey64() throws IOException {
     Decoder decoder = Base64.getDecoder();
-    String privateKey;
+    byte[] temp = new byte[128];
+    byte[] result;
     System.out.println("Please input private key by base64.");
     while (true) {
-      String input = in.nextLine().trim();
-      String priKey64 = input.split("\\s+")[0];
-      privateKey = ByteArray.toHexString(decoder.decode(priKey64));
-
-      if (WalletClient.priKeyValid(privateKey)) {
-        break;
+      int len = System.in.read(temp, 0, temp.length);
+      if (len >= 44) {
+        byte[] priKey64 = Arrays.copyOfRange(temp, 0, 44);
+        result = decoder.decode(priKey64);
+        StringUtils.clear(priKey64);
+        if (WalletClient.priKeyValid(result)) {
+          break;
+        }
       }
       System.out.println("Invalid base64 private key, please input again.");
     }
-    return privateKey;
+    StringUtils.clear(temp);
+    return result;
   }
 
   private void registerWallet() throws CipherException, IOException {
-    String password = inputPassword2Twice();
+    char[] password = inputPassword2Twice();
     String fileName = client.registerWallet(password);
+    StringUtils.clear(password);
+
     if (null == fileName) {
       logger.info("Register wallet failed !!");
       return;
@@ -96,80 +112,103 @@ public class TestClient {
   }
 
   private void importWallet() throws CipherException, IOException {
-    String password = inputPassword2Twice();
-    String priKey = inputPrivateKey();
+    char[] password = inputPassword2Twice();
+    byte[] priKey = inputPrivateKey();
 
     String fileName = client.importWallet(password, priKey);
+    StringUtils.clear(password);
+    StringUtils.clear(priKey);
+
     if (null == fileName) {
-      logger.info("Import wallet failed !!");
+      System.out.println("Import wallet failed !!");
       return;
     }
-    logger.info("ImportImport a wallet successful, keystore file name is " + fileName);
+    System.out.println("Import a wallet successful, keystore file name is " + fileName);
   }
 
   private void importwalletByBase64() throws CipherException, IOException {
-    String password = inputPassword2Twice();
-    String priKey = inputPrivateKey64();
+    char[] password = inputPassword2Twice();
+    byte[] priKey = inputPrivateKey64();
 
     String fileName = client.importWallet(password, priKey);
+    StringUtils.clear(password);
+    StringUtils.clear(priKey);
+
     if (null == fileName) {
-      logger.info("Import wallet failed !!");
+      System.out.println("Import wallet failed !!");
       return;
     }
-    logger.info("ImportImport a wallet successful, keystore file name is " + fileName);
+    System.out.println("Import a wallet successful, keystore file name is " + fileName);
   }
 
   private void changePassword() throws IOException, CipherException {
     System.out.println("Please input old password.");
-    String oldPassword = Utils.inputPassword(false);
+    char[] oldPassword = Utils.inputPassword(false);
     System.out.println("Please input new password.");
-    String newPassword = inputPassword2Twice();
+    char[] newPassword = inputPassword2Twice();
 
     if (client.changePassword(oldPassword, newPassword)) {
-      logger.info("ChangePassword successful !!");
+      System.out.println("ChangePassword successful !!");
     } else {
-      logger.info("ChangePassword failed !!");
+      System.out.println("ChangePassword failed !!");
     }
+    StringUtils.clear(oldPassword);
+    StringUtils.clear(newPassword);
   }
 
   private void login() throws IOException, CipherException {
     System.out.println("Please input your password.");
-    String password = Utils.inputPassword(false);
+    char[] password = Utils.inputPassword(false);
 
     boolean result = client.login(password);
+    StringUtils.clear(password);
+
     if (result) {
-      logger.info("Login successful !!!");
+      System.out.println("Login successful !!!");
     } else {
-      logger.info("Login failed !!!");
+      System.out.println("Login failed !!!");
     }
   }
 
   private void logout() {
     client.logout();
-    logger.info("Logout successful !!!");
+    System.out.println("Logout successful !!!");
   }
 
   private void backupWallet() throws IOException, CipherException {
     System.out.println("Please input your password.");
-    String password = Utils.inputPassword(false);
+    char[] password = Utils.inputPassword(false);
 
-    String priKey = client.backupWallet(password);
-    if (priKey != null) {
-      logger.info("Backup a wallet successful !!");
-      logger.info("priKey = " + priKey);
+    byte[] priKey = client.backupWallet(password);
+    StringUtils.clear(password);
+
+    if (!ArrayUtils.isEmpty(priKey)) {
+      System.out.println("BackupWallet successful !!");
+      for (int i = 0; i < priKey.length; i++) {
+        StringUtils.printOneByte(priKey[i]);
+      }
+      System.out.println();
     }
+    StringUtils.clear(priKey);
   }
 
   private void backupWallet2Base64() throws IOException, CipherException {
     System.out.println("Please input your password.");
-    String password = Utils.inputPassword(false);
+    char[] password = Utils.inputPassword(false);
 
-    String priKey = client.backupWallet(password);
-    Encoder encoder = Base64.getEncoder();
-    String priKey64 = encoder.encodeToString(ByteArray.fromHexString(priKey));
-    if (priKey != null) {
-      logger.info("Backup a wallet successful !!");
-      logger.info("priKey = " + priKey64);
+    byte[] priKey = client.backupWallet(password);
+    StringUtils.clear(password);
+
+    if (!ArrayUtils.isEmpty(priKey)) {
+      Encoder encoder = Base64.getEncoder();
+      byte[] priKey64 = encoder.encode(priKey);
+      StringUtils.clear(priKey);
+      System.out.println("BackupWallet successful !!");
+      for (int i = 0; i < priKey64.length; i++) {
+        System.out.print((char) priKey64[i]);
+      }
+      System.out.println();
+      StringUtils.clear(priKey64);
     }
   }
 
@@ -184,7 +223,7 @@ public class TestClient {
   private void getBalance() {
     Account account = client.queryAccount();
     if (account == null) {
-      logger.info("Get Balance failed !!!!");
+      logger.info("GetBalance failed !!!!");
 
     } else {
       long balance = account.getBalance();
@@ -194,7 +233,7 @@ public class TestClient {
 
   private void getAccount(String[] parameters) {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("GetAccount need 1 parameter like following: ");
+      System.out.println("GetAccount needs 1 parameter like the following: ");
       System.out.println("GetAccount Address ");
       return;
     }
@@ -206,7 +245,7 @@ public class TestClient {
 
     Account account = WalletClient.queryAccount(addressBytes);
     if (account == null) {
-      logger.info("Get Account failed !!!!");
+      logger.info("GetAccount failed !!!!");
     } else {
       logger.info("\n" + Utils.printAccount(account));
     }
@@ -215,7 +254,7 @@ public class TestClient {
   private void updateAccount(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("UpdateAccount need 1 parameter like following: ");
+      System.out.println("UpdateAccount needs 1 parameter like the following: ");
       System.out.println("UpdateAccount AccountName ");
       return;
     }
@@ -225,7 +264,7 @@ public class TestClient {
 
     boolean ret = client.updateAccount(accountNameBytes);
     if (ret) {
-      logger.info("Update Account success !!!!");
+      logger.info("Update Account successful !!!!");
     } else {
       logger.info("Update Account failed !!!!");
     }
@@ -234,7 +273,7 @@ public class TestClient {
   private void updateAsset(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 4) {
-      System.out.println("UpdateAsset need 4 parameter like following: ");
+      System.out.println("UpdateAsset needs 4 parameters like the following: ");
       System.out.println("UpdateAsset newLimit newPublicLimit description url");
       return;
     }
@@ -251,7 +290,7 @@ public class TestClient {
 
     boolean ret = client.updateAsset(descriptionBytes, urlBytes, newLimit, newPublicLimit);
     if (ret) {
-      logger.info("Update Asset success !!!!");
+      logger.info("Update Asset successful !!!!");
     } else {
       logger.info("Update Asset failed !!!!");
     }
@@ -259,7 +298,7 @@ public class TestClient {
 
   private void getAssetIssueByAccount(String[] parameters) {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("GetAssetIssueByAccount need 1 parameter like following: ");
+      System.out.println("GetAssetIssueByAccount needs 1 parameter like following: ");
       System.out.println("GetAssetIssueByAccount Address ");
       return;
     }
@@ -280,7 +319,7 @@ public class TestClient {
 
   private void getAccountNet(String[] parameters) {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("GetAccountNet need 1 parameter like following: ");
+      System.out.println("GetAccountNet needs 1 parameter like following: ");
       System.out.println("GetAccountNet Address ");
       return;
     }
@@ -300,7 +339,7 @@ public class TestClient {
 
   private void getAssetIssueByName(String[] parameters) {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("GetAssetIssueByName need 1 parameter like following: ");
+      System.out.println("GetAssetIssueByName needs 1 parameter like following: ");
       System.out.println("GetAssetIssueByName AssetName ");
       return;
     }
@@ -316,7 +355,7 @@ public class TestClient {
 
   private void sendCoin(String[] parameters) throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 2) {
-      System.out.println("SendCoin need 2 parameter like following: ");
+      System.out.println("SendCoin needs 2 parameters like following: ");
       System.out.println("SendCoin ToAddress Amount");
       return;
     }
@@ -336,10 +375,10 @@ public class TestClient {
   private void testTransaction(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || (parameters.length != 3 && parameters.length != 4)) {
-      System.out.println("testTransaction need 3 or 4 parameter like following: ");
+      System.out.println("testTransaction needs 3 or 4 parameters using the following syntax: ");
       System.out.println("testTransaction ToAddress assertName times");
       System.out.println("testTransaction ToAddress assertName times interval");
-      System.out.println("If needn't transferAsset, assertName input null");
+      System.out.println("If needing transferAsset, assertName input null");
       return;
     }
 
@@ -398,7 +437,7 @@ public class TestClient {
   private void transferAsset(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 3) {
-      System.out.println("TransferAsset need 3 parameter like following: ");
+      System.out.println("TransferAsset needs 3 parameters using the following syntax: ");
       System.out.println("TransferAsset ToAddress AssertName Amount");
       return;
     }
@@ -419,7 +458,7 @@ public class TestClient {
   private void participateAssetIssue(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 3) {
-      System.out.println("ParticipateAssetIssue need 3 parameter like following: ");
+      System.out.println("ParticipateAssetIssue needs 3 parameters using the following syntax: ");
       System.out.println("ParticipateAssetIssue ToAddress AssetName Amount");
       return;
     }
@@ -442,7 +481,7 @@ public class TestClient {
   private void assetIssue(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length < 10 || (parameters.length & 1) == 1) {
-      System.out.println("Use assetIssue command you need like: ");
+      System.out.println("Use the assetIssue command for features that you require with below syntax: ");
       System.out.println(
           "AssetIssue AssetName TotalSupply TrxNum AssetNum "
               + "StartDate EndDate Description Url FreeNetLimitPerAccount PublicFreeNetLimit"
@@ -495,7 +534,7 @@ public class TestClient {
   private void createAccount(String[] parameters)
       throws CipherException, IOException, CancelException {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("CreateAccount need 1 parameter like following: ");
+      System.out.println("CreateAccount needs 1 parameter using the following syntax: ");
       System.out.println("CreateAccount Address");
       return;
     }
@@ -513,7 +552,7 @@ public class TestClient {
   private void createWitness(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("CreateWitness need 1 parameter like following: ");
+      System.out.println("CreateWitness needs 1 parameter using the following syntax: ");
       System.out.println("CreateWitness Url");
       return;
     }
@@ -531,7 +570,7 @@ public class TestClient {
   private void updateWitness(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 1) {
-      System.out.println("updateWitness need 1 parameter like following: ");
+      System.out.println("updateWitness needs 1 parameter using the following syntax: ");
       System.out.println("updateWitness Url");
       return;
     }
@@ -566,6 +605,23 @@ public class TestClient {
     }
   }
 
+  private void getAssetIssueList(String[] parameters) {
+    if (parameters == null || parameters.length != 2) {
+      System.out.println("The listassetissuepaginated command needs 2 parameters, use the following syntax:");
+      System.out.println("listassetissuepaginated offset limit ");
+      return;
+    }
+    int offset = Integer.parseInt(parameters[0]);
+    int limit = Integer.parseInt(parameters[1]);
+    Optional<AssetIssueList> result = client.getAssetIssueList(offset, limit);
+    if (result.isPresent()) {
+      AssetIssueList assetIssueList = result.get();
+      logger.info(Utils.printAssetIssueList(assetIssueList));
+    } else {
+      logger.info("GetAssetIssueListPaginated " + " failed !!");
+    }
+  }
+
   private void listNodes() {
     Optional<NodeList> result = client.listNodes();
     if (result.isPresent()) {
@@ -588,15 +644,15 @@ public class TestClient {
       System.out.println("Get current block !!!!");
     } else {
       if (parameters.length != 1) {
-        System.out.println("Get block too many paramters !!!");
-        System.out.println("You can get current block like:");
+        System.out.println("Getblock has too many parameters !!!");
+        System.out.println("You can get current block using the following command:");
         System.out.println("Getblock");
-        System.out.println("Or get block by number like:");
+        System.out.println("Or get block by number with the following syntax:");
         System.out.println("Getblock BlockNum");
       }
       blockNum = Long.parseLong(parameters[0]);
     }
-    Block block = client.GetBlock(blockNum);
+    Block block = client.getBlock(blockNum);
     if (block == null) {
       logger.info("No block for num : " + blockNum);
       return;
@@ -607,7 +663,7 @@ public class TestClient {
   private void voteWitness(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length < 2 || (parameters.length & 1) != 0) {
-      System.out.println("Use VoteWitness command you need like: ");
+      System.out.println("Use VoteWitness command with below syntax: ");
       System.out.println("VoteWitness Address0 Count0 ... AddressN CountN");
       return;
     }
@@ -630,7 +686,7 @@ public class TestClient {
   private void freezeBalance(String[] parameters)
       throws IOException, CipherException, CancelException {
     if (parameters == null || parameters.length != 2) {
-      System.out.println("Use freezeBalance command you need like: ");
+      System.out.println("Use freezeBalance command with below syntax: ");
       System.out.println("freezeBalance frozen_balance frozen_duration ");
       return;
     }
@@ -755,7 +811,7 @@ public class TestClient {
   private void getTransactionById(String[] parameters) {
     String txid = "";
     if (parameters == null || parameters.length != 1) {
-      System.out.println("getTransactionById needs 1 parameters, transaction id");
+      System.out.println("getTransactionById needs 1 parameter, transaction id");
       return;
     } else {
       txid = parameters[0];
@@ -769,9 +825,26 @@ public class TestClient {
     }
   }
 
+  private void getTransactionInfoById(String[] parameters) {
+    String txid = "";
+    if (parameters == null || parameters.length != 1) {
+      System.out.println("getTransactionInfoById needs 1 parameter, transaction id");
+      return;
+    } else {
+      txid = parameters[0];
+    }
+    Optional<TransactionInfo> result = WalletClient.getTransactionInfoById(txid);
+    if (result.isPresent()) {
+      TransactionInfo transactionInfo = result.get();
+      logger.info(Utils.printTransactionInfo(transactionInfo));
+    } else {
+      logger.info("getTransactionInfoById " + " failed !!");
+    }
+  }
+
   private void getTransactionsFromThis(String[] parameters) {
     if (parameters == null || parameters.length != 3) {
-      System.out.println("GetTransactionsFromThis need 3 parameter like following: ");
+      System.out.println("GetTransactionsFromThis needs 3 parameters, use the following syntax: ");
       System.out.println("GetTransactionsFromThis Address offset limit");
       return;
     }
@@ -811,7 +884,7 @@ public class TestClient {
 
   private void getTransactionsToThis(String[] parameters) {
     if (parameters == null || parameters.length != 3) {
-      System.out.println("getTransactionsToThis need 3 parameter like following: ");
+      System.out.println("getTransactionsToThis needs 3 parameters, use the following syntax: ");
       System.out.println("getTransactionsToThis Address offset limit");
       return;
     }
@@ -852,7 +925,7 @@ public class TestClient {
   private void getBlockById(String[] parameters) {
     String blockID = "";
     if (parameters == null || parameters.length != 1) {
-      System.out.println("getBlockById needs 1 parameters, block id which is hex format");
+      System.out.println("getBlockById needs 1 parameter, block id which is hex format");
       return;
     } else {
       blockID = parameters[0];
@@ -889,7 +962,7 @@ public class TestClient {
   private void getBlockByLatestNum(String[] parameters) {
     long num = 0;
     if (parameters == null || parameters.length != 1) {
-      System.out.println("getBlockByLatestNum needs 1 parameters, block num");
+      System.out.println("getBlockByLatestNum needs 1 parameter, block num");
       return;
     } else {
       num = Long.parseLong(parameters[0]);
@@ -904,8 +977,9 @@ public class TestClient {
   }
 
   private void help() {
-    System.out.println("You can enter the following command: ");
-
+    System.out.println("Help: List of Tron Wallet-cli commands");
+    System.out.println("For more information on a specific command, type the command and it will display tips");
+    System.out.println("");
     System.out.println("RegisterWallet");
     System.out.println("ImportWallet");
     System.out.println("ImportWalletByBase64");
@@ -933,16 +1007,17 @@ public class TestClient {
     System.out.println("ListNodes");
     System.out.println("GetBlock");
     System.out.println("GetTotalTransaction");
- //   System.out.println("GetAssetIssueListByTimestamp");
+    //   System.out.println("GetAssetIssueListByTimestamp");
     System.out.println("GetTotalTransaction");
     System.out.println("GetNextMaintenanceTime");
- //   System.out.println("GetTransactionsByTimestamp");
- //   System.out.println("GetTransactionsByTimestampCount");
+    //   System.out.println("GetTransactionsByTimestamp");
+    //   System.out.println("GetTransactionsByTimestampCount");
     System.out.println("GetTransactionById");
+    System.out.println("getTransactionInfoById");
     System.out.println("GetTransactionsFromThis");
- //   System.out.println("GetTransactionsFromThisCount");
+    //   System.out.println("GetTransactionsFromThisCount");
     System.out.println("GetTransactionsToThis");
- //   System.out.println("GetTransactionsToThisCount");
+    //   System.out.println("GetTransactionsToThisCount");
     System.out.println("GetBlockById");
     System.out.println("GetBlockByLimitNext");
     System.out.println("GetBlockByLatestNum");
@@ -954,12 +1029,18 @@ public class TestClient {
     System.out.println("UnfreezeAsset");
     System.out.println("Exit or Quit");
 
-    System.out.println("Input any one of then, you will get more tips.");
+    System.out.println("Input any one of the listed commands, to display how-to tips.");
   }
 
   private void run() {
     Scanner in = new Scanner(System.in);
-    System.out.println("Please input your command.");
+    System.out.println(" ");
+    System.out.println("Welcome to Tron Wallet-Cli");
+    System.out.println("Please type one of the following commands to proceed.");
+    System.out.println("Login, RegisterWallet or ImportWallet");
+    System.out.println(" ");
+    System.out.println("You may also use the Help command at anytime to display a full list of commands.");
+    System.out.println(" ");
     while (in.hasNextLine()) {
       String cmd = "";
       try {
@@ -1102,6 +1183,10 @@ public class TestClient {
             getAssetIssueList();
             break;
           }
+          case "listassetissuepaginated": {
+            getAssetIssueList(parameters);
+            break;
+          }
           case "listnodes": {
             listNodes();
             break;
@@ -1148,6 +1233,10 @@ public class TestClient {
 //          }
           case "gettransactionbyid": {
             getTransactionById(parameters);
+            break;
+          }
+          case "gettransactioninfobyid": {
+            getTransactionInfoById(parameters);
             break;
           }
           case "getblockbyid": {

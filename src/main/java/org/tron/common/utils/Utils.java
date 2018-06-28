@@ -20,11 +20,13 @@ package org.tron.common.utils;
 
 import com.google.protobuf.ByteString;
 import java.io.Console;
+import java.io.IOException;
 import java.security.SecureRandom;
 import java.nio.*;
 import java.nio.charset.Charset;
 import java.text.ParsePosition;
 import java.text.SimpleDateFormat;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.Scanner;
@@ -33,6 +35,8 @@ import org.tron.api.GrpcAPI.AssetIssueList;
 import org.tron.api.GrpcAPI.BlockList;
 import org.tron.api.GrpcAPI.TransactionList;
 import org.tron.api.GrpcAPI.WitnessList;
+import org.tron.common.crypto.Sha256Hash;
+import org.tron.keystore.StringUtils;
 import org.tron.protos.Contract.AccountCreateContract;
 import org.tron.protos.Contract.AccountUpdateContract;
 import org.tron.protos.Contract.AssetIssueContract;
@@ -51,6 +55,7 @@ import org.tron.protos.Contract.WitnessCreateContract;
 import org.tron.protos.Contract.WitnessUpdateContract;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Account.Frozen;
+import org.tron.protos.Protocol.TransactionInfo;
 import org.tron.protos.Protocol.Vote;
 import org.tron.protos.Protocol.Block;
 import org.tron.protos.Protocol.BlockHeader;
@@ -384,7 +389,7 @@ public class Utils {
   public static String printContract(Transaction.Contract contract) {
     String result = "";
     try {
-      result += "type: ";
+      result += "contract_type: ";
       result += contract.getType();
       result += "\n";
 
@@ -659,11 +664,39 @@ public class Utils {
   }
 
   public static String printRet(List<Result> resultList) {
-    return "";
+    String results = "";
+    int i = 0;
+    for(Result result: resultList){
+      results += "result: ";
+      results += i;
+      results += " ::: ";
+      results += "\n";
+      results += "[";
+      results += "\n";
+      results += "code ::: ";
+      results += result.getRet();
+      results += "\n";
+      results += "fee ::: ";
+      results += result.getFee();
+      results += "\n";
+      results += "]";
+      results += "\n";
+      i++;
+    }
+    return results;
   }
 
   public static String printTransaction(Transaction transaction) {
     String result = "";
+    result += "hash: ";
+    result += "\n";
+    result += ByteArray.toHexString(Sha256Hash.hash(transaction.toByteArray()));
+    result += "\n";
+    result += "txid: ";
+    result += "\n";
+    result += ByteArray.toHexString(Sha256Hash.hash(transaction.getRawData().toByteArray()));
+    result += "\n";
+
     if (transaction.getRawData() != null) {
       result += "raw_data: ";
       result += "\n";
@@ -691,6 +724,27 @@ public class Utils {
       result += "}";
       result += "\n";
     }
+    return result;
+  }
+
+  public static String printTransactionInfo(TransactionInfo transactionInfo) {
+    String result = "";
+    result += "txid: ";
+    result += "\n";
+    result += ByteArray.toHexString(transactionInfo.getId().toByteArray());
+    result += "\n";
+    result += "fee: ";
+    result += "\n";
+    result += transactionInfo.getFee() ;
+    result += "\n";
+    result += "blockNumber: ";
+    result += "\n";
+    result += transactionInfo.getBlockNumber() ;
+    result += "\n";
+    result += "blockTimeStamp: ";
+    result += "\n";
+    result += transactionInfo.getBlockTimeStamp() ;
+    result += "\n";
     return result;
   }
 
@@ -840,20 +894,25 @@ public class Utils {
     return result;
   }
 
-  public static String inputPassword(boolean checkStrength) {
-    Scanner in = null;
-    String password;
+  public static char[] inputPassword(boolean checkStrength) throws IOException {
+    char[] password;
     Console cons = System.console();
-    if (cons == null) {
-      in = new Scanner(System.in);
-    }
     while (true) {
       if (cons != null) {
-        char[] pwd = cons.readPassword("password: ");
-        password = String.valueOf(pwd);
+        password = cons.readPassword("password: ");
       } else {
-        String input = in.nextLine().trim();
-        password = input.split("\\s+")[0];
+        byte[] passwd0 = new byte[64];
+        int len = System.in.read(passwd0, 0, passwd0.length);
+        int i;
+        for (i = 0; i < len; i++) {
+          if (passwd0[i] == 0x09 || passwd0[i] == 0x0A) {
+            break;
+          }
+        }
+        byte[] passwd1 = Arrays.copyOfRange(passwd0, 0, i);
+        password = StringUtils.byte2Char(passwd1);
+        StringUtils.clear(passwd0);
+        StringUtils.clear(passwd1);
       }
       if (WalletClient.passwordValid(password)) {
         return password;
@@ -861,6 +920,7 @@ public class Utils {
       if (!checkStrength) {
         return password;
       }
+      StringUtils.clear(password);
       System.out.println("Invalid password, please input again.");
     }
   }

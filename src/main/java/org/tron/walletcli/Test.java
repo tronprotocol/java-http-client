@@ -1,48 +1,33 @@
 package org.tron.walletcli;
 
+import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
-import com.maxmind.geoip2.DatabaseReader;
-import com.maxmind.geoip2.model.CityResponse;
-import com.maxmind.geoip2.record.City;
-import com.maxmind.geoip2.record.Country;
-import com.maxmind.geoip2.record.Location;
-import com.maxmind.geoip2.record.Postal;
-import com.maxmind.geoip2.record.Subdivision;
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.math.BigInteger;
-import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Base64.Decoder;
 import java.util.Base64.Encoder;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import org.tron.common.crypto.ECKey;
 import org.tron.common.crypto.ECKey.ECDSASignature;
 import org.tron.common.crypto.Hash;
+import org.tron.common.crypto.Sha256Hash;
 import org.tron.common.utils.Base58;
 import org.tron.common.utils.ByteArray;
 import org.tron.common.utils.Utils;
-import org.tron.explorer.controller.NodeController;
 import org.tron.keystore.CheckStrength;
-import org.tron.keystore.CipherException;
+import org.tron.core.exception.CipherException;
 import org.tron.keystore.Credentials;
 import org.tron.keystore.WalletUtils;
 import org.tron.protos.Contract;
+import org.tron.protos.Contract.TransferContract;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Transaction;
-import org.tron.protos.Contract.TransferContract;
-import com.google.protobuf.Any;
 import org.tron.walletserver.WalletClient;
 
 public class Test {
@@ -142,7 +127,7 @@ public class Test {
     byte[] msg = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 0, 1, 2, 3, 4, 5, 6, 7, 8,
         9, 10, 11, 12, 13, 14, 15};
 
-    byte[] sha256 = Hash.sha256(msg);
+    byte[] sha256 = Sha256Hash.hash(msg);
     ECDSASignature signature = eCkey.sign(sha256);
 
     System.out.println("hash:::" + ByteArray.toHexString(sha256));
@@ -210,8 +195,8 @@ public class Test {
     byte[] hash = Hash.sha3(Arrays.copyOfRange(pubKey, 1, pubKey.length));
     byte[] hash_ = Hash.sha3(pubKey);
     byte[] address = eCkey.getAddress();
-    byte[] hash0 = Hash.sha256(address);
-    byte[] hash1 = Hash.sha256(hash0);
+    byte[] hash0 = Sha256Hash.hash(address);
+    byte[] hash1 = Sha256Hash.hash(hash0);
     byte[] checkSum = Arrays.copyOfRange(hash1, 0, 4);
     byte[] addchecksum = new byte[address.length + 4];
     System.arraycopy(address, 0, addchecksum, 0, address.length);
@@ -332,8 +317,8 @@ public class Test {
     String priKeyHex = "cba92a516ea09f620a16ff7ee95ce0df1d56550a8babe9964981a7144c8a784a";
     ECKey eCkey = ECKey.fromPrivate(ByteArray.fromHexString(priKeyHex));
     File file = new File("out");
-    String fileName = WalletUtils.generateWalletFile(PASSWORD, eCkey, file, true);
-    Credentials credentials = WalletUtils.loadCredentials(PASSWORD, new File(file, fileName));
+    String fileName = WalletUtils.generateWalletFile(PASSWORD.getBytes(), eCkey, file, true);
+    Credentials credentials = WalletUtils.loadCredentials(PASSWORD.getBytes(), new File(file, fileName));
     String address = credentials.getAddress();
     ECKey ecKeyPair = credentials.getEcKeyPair();
     String prikey = ByteArray.toHexString(ecKeyPair.getPrivKeyBytes());
@@ -368,7 +353,7 @@ public class Test {
     passwordList.add("1q2w3e$R%T^Y/:");
 
     for (String password : passwordList) {
-      int level = CheckStrength.checkPasswordStrength(password);
+      int level = CheckStrength.checkPasswordStrength(password.toCharArray());
       System.out.println(password + " strength is " + level);
     }
   }

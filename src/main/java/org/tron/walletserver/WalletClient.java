@@ -21,11 +21,12 @@ import org.tron.api.GrpcAPI;
 import org.tron.api.GrpcAPI.AccountNetMessage;
 import org.tron.api.GrpcAPI.AssetIssueList;
 import org.tron.api.GrpcAPI.BlockList;
+import org.tron.api.GrpcAPI.EasyTransferResponse;
 import org.tron.api.GrpcAPI.NodeList;
 import org.tron.api.GrpcAPI.TransactionList;
 import org.tron.api.GrpcAPI.WitnessList;
 import org.tron.common.crypto.ECKey;
-import org.tron.common.crypto.Hash;
+import org.tron.common.crypto.Sha256Hash;
 import org.tron.common.utils.Base58;
 import org.tron.common.utils.ByteArray;
 import org.tron.common.utils.TransactionUtils;
@@ -34,7 +35,7 @@ import org.tron.core.config.Configuration;
 import org.tron.core.config.Parameter.CommonConstant;
 import org.tron.core.exception.CancelException;
 import org.tron.keystore.CheckStrength;
-import org.tron.keystore.CipherException;
+import org.tron.core.exception.CipherException;
 import org.tron.keystore.Credentials;
 import org.tron.keystore.Wallet;
 import org.tron.keystore.WalletFile;
@@ -48,6 +49,8 @@ import org.tron.protos.Contract.WithdrawBalanceContract;
 import org.tron.protos.Protocol.Account;
 import org.tron.protos.Protocol.Block;
 import org.tron.protos.Protocol.Transaction;
+import org.tron.protos.Protocol.TransactionInfo;
+import org.tron.protos.Protocol.TransactionSign;
 import org.tron.protos.Protocol.Witness;
 
 class AccountComparator implements Comparator {
@@ -74,8 +77,6 @@ public class WalletClient {
   private static byte addressPreFixByte = CommonConstant.ADD_PRE_FIX_BYTE_TESTNET;
 
   private static GrpcClient rpcCli = init();
-  private static String dbPath;
-  private static String txtPath;
 
 //  static {
 //    new Timer().schedule(new TimerTask() {
@@ -91,8 +92,6 @@ public class WalletClient {
 
   public static GrpcClient init() {
     Config config = Configuration.getByPath("config.conf");
-    dbPath = config.getString("CityDb.DbPath");
-    txtPath = System.getProperty("user.dir") + "/" + config.getString("CityDb.TxtPath");
 
     String fullNode = "";
     String solidityNode = "";
@@ -150,26 +149,18 @@ public class WalletClient {
     WalletClient.addressPreFixByte = addressPreFixByte;
   }
 
-  public static String getDbPath() {
-    return dbPath;
-  }
-
-  public static String getTxtPath() {
-    return txtPath;
-  }
-
   /**
    * Creates a new WalletClient with a random ECKey or no ECKey.
    */
-  public WalletClient(String password) throws CipherException {
+  public WalletClient(byte[] password) throws CipherException {
     ECKey ecKey = new ECKey(Utils.getRandom());
     this.walletFile = Wallet.createStandard(password, ecKey);
     this.address = ecKey.getAddress();
   }
 
   //  Create Wallet with a pritKey
-  public WalletClient(String password, String priKey) throws CipherException {
-    ECKey ecKey = ECKey.fromPrivate(ByteArray.fromHexString(priKey));
+  public WalletClient(byte[] password, byte[] priKey) throws CipherException {
+    ECKey ecKey = ECKey.fromPrivate(priKey);
     this.walletFile = Wallet.createStandard(password, ecKey);
     this.address = ecKey.getAddress();
   }
@@ -187,21 +178,32 @@ public class WalletClient {
     loginState = true;
   }
 
+  public boolean checkPassword(byte[] passwd) throws CipherException {
+    return Wallet.validPassword(passwd, this.walletFile);
+  }
+
   /**
    * Creates a Wallet with an existing ECKey.
    */
-  public WalletClient(String password, final ECKey ecKey, String address) throws CipherException {
-    this.walletFile = Wallet.createStandard(password, ecKey);
-    this.address = decodeFromBase58Check(address);
+  public WalletClient(WalletFile walletFile) {
+    this.walletFile = walletFile;
+    this.address = decodeFromBase58Check(walletFile.getAddress());
   }
 
-  public ECKey getEcKey(String password) throws CipherException, IOException {
+  public ECKey getEcKey(byte[] password) throws CipherException, IOException {
     if (walletFile == null) {
-      Credentials credentials = loadCredentials(password);
-      this.walletFile = Wallet.createStandard(password, credentials.getEcKeyPair());
-      this.address = decodeFromBase58Check(credentials.getAddress());
+      this.walletFile = loadWalletFile();
+      this.address = decodeFromBase58Check(this.walletFile.getAddress());
     }
     return Wallet.decrypt(password, walletFile);
+  }
+
+  public byte[] getPrivateBytes(byte[] password) throws CipherException, IOException {
+    if (walletFile == null) {
+      this.walletFile = loadWalletFile();
+      this.address = decodeFromBase58Check(this.walletFile.getAddress());
+    }
+    return Wallet.decrypt2PrivateBytes(password, walletFile);
   }
 
   public byte[] getAddress() {
@@ -215,11 +217,18 @@ public class WalletClient {
     }
     File file = new File(FilePath);
     if (!file.exists()) {
-      file.mkdir();
+      if (!file.mkdir()) {
+        throw new IOException("Make directory failed!");
+      }
     } else {
       if (!file.isDirectory()) {
-        file.delete();
-        file.mkdir();
+        if (file.delete()) {
+          if (!file.mkdir()) {
+            throw new IOException("Make directory failed!");
+          }
+        } else {
+          throw new IOException("File exists and can not be deleted!");
+        }
       }
     }
     return WalletUtils.generateWalletFile(walletFile, file);
@@ -239,7 +248,7 @@ public class WalletClient {
     File wallet;
     if (wallets.length > 1) {
       for (int i = 0; i < wallets.length; i++) {
-        System.out.println("The " + (i + 1) + "th keystore fime name is " + wallets[i].getName());
+        System.out.println("The " + (i + 1) + "the keystore file name is " + wallets[i].getName());
       }
       System.out.println("Please choose between 1 and " + wallets.length);
       Scanner in = new Scanner(System.in);
@@ -268,27 +277,35 @@ public class WalletClient {
     return wallet;
   }
 
-  public static boolean changeKeystorePassword(String oldPassword, String newPassowrd)
+  public static boolean changeKeystorePassword(byte[] oldPassword, byte[] newPassowrd)
       throws IOException, CipherException {
     File wallet = selcetWalletFile();
+    if (wallet == null) {
+      throw new IOException(
+          "No keystore file found, please use registerwallet or importwallet first!");
+    }
     Credentials credentials = WalletUtils.loadCredentials(oldPassword, wallet);
     WalletUtils.updateWalletFile(newPassowrd, credentials.getEcKeyPair(), wallet, true);
     return true;
   }
 
-  private static Credentials loadCredentials(String password) throws IOException, CipherException {
+
+  private static WalletFile loadWalletFile() throws IOException {
     File wallet = selcetWalletFile();
-    return WalletUtils.loadCredentials(password, wallet);
+    if (wallet == null) {
+      throw new IOException(
+          "No keystore file found, please use registerwallet or importwallet first!");
+    }
+    return WalletUtils.loadWalletFile(wallet);
   }
 
   /**
    * load a Wallet from keystore
    */
-  public static WalletClient loadWalletFromKeystore(String password)
+  public static WalletClient loadWalletFromKeystore()
       throws IOException, CipherException {
-    Credentials credentials = loadCredentials(password);
-    WalletClient walletClient = new WalletClient(password, credentials.getEcKeyPair(),
-        credentials.getAddress());
+    WalletFile walletFile = loadWalletFile();
+    WalletClient walletClient = new WalletClient(walletFile);
     return walletClient;
   }
 
@@ -319,10 +336,29 @@ public class WalletClient {
       }
     }
     System.out.println("Please input your password.");
-    String password = Utils.inputPassword(false);
+    char[] password = Utils.inputPassword(false);
+    byte[] passwd = org.tron.keystore.StringUtils.char2Byte(password);
+    org.tron.keystore.StringUtils.clear(password);
     System.out.println(
-        "txid = " + ByteArray.toHexString(Hash.sha256(transaction.getRawData().toByteArray())));
-    return TransactionUtils.sign(transaction, this.getEcKey(password));
+        "txid = " + ByteArray.toHexString(Sha256Hash.hash(transaction.getRawData().toByteArray())));
+    transaction = TransactionUtils.sign(transaction, this.getEcKey(passwd));
+    org.tron.keystore.StringUtils.clear(passwd);
+    return transaction;
+  }
+  //Warning: do not invoke this interface provided by others.
+  public static Transaction signTransactionByApi(Transaction transaction, byte[] privateKey) {
+    TransactionSign.Builder builder = TransactionSign.newBuilder();
+    builder.setPrivateKey(ByteString.copyFrom(privateKey));
+    builder.setTransaction(transaction);
+    return rpcCli.signTransaction(builder.build());
+  }
+  //Warning: do not invoke this interface provided by others.
+  public static byte[] createAdresss(byte[] passPhrase) {
+    return rpcCli.createAdresss(passPhrase);
+  }
+  //Warning: do not invoke this interface provided by others.
+  public static EasyTransferResponse easyTransfer(byte[] passPhrase, byte[] toAddress, long amount) {
+    return rpcCli.easyTransfer(passPhrase, toAddress, amount);
   }
 
   public boolean sendCoin(byte[] to, long amount)
@@ -488,7 +524,7 @@ public class WalletClient {
     return rpcCli.createAssetIssue(contract);
   }
 
-  public static Block GetBlock(long blockNum) {
+  public static Block getBlock(long blockNum) {
     return rpcCli.getBlock(blockNum);
   }
 
@@ -643,11 +679,11 @@ public class WalletClient {
     return builder.build();
   }
 
-  public static boolean passwordValid(String password) {
-    if (StringUtils.isEmpty(password)) {
+  public static boolean passwordValid(char[] password) {
+    if (ArrayUtils.isEmpty(password)) {
       throw new IllegalArgumentException("password is empty");
     }
-    if (password.length() < 6) {
+    if (password.length < 6) {
       logger.warn("Warning: Password is too short !!");
       return false;
     }
@@ -655,6 +691,14 @@ public class WalletClient {
     int level = CheckStrength.checkPasswordStrength(password);
     if (level <= 4) {
       System.out.println("Your password is too weak!");
+      System.out.println("The password should be at least 8 characters.");
+      System.out.println("The password should contains uppercase, lowercase, numeric and other.");
+      System.out.println(
+          "The password should not contain more than 3 duplicate numbers or letters; For example: 1111.");
+      System.out.println(
+          "The password should not contain more than 3 consecutive Numbers or letters; For example: 1234.");
+      System.out.println("The password should not contain weak password combination; For example:");
+      System.out.println("ababab, abcabc, password, passw0rd, p@ssw0rd, admin1234, etc.");
       return false;
     }
     return true;
@@ -683,8 +727,8 @@ public class WalletClient {
   }
 
   public static String encode58Check(byte[] input) {
-    byte[] hash0 = Hash.sha256(input);
-    byte[] hash1 = Hash.sha256(hash0);
+    byte[] hash0 = Sha256Hash.hash(input);
+    byte[] hash1 = Sha256Hash.hash(hash0);
     byte[] inputCheck = new byte[input.length + 4];
     System.arraycopy(input, 0, inputCheck, 0, input.length);
     System.arraycopy(hash1, 0, inputCheck, input.length, 4);
@@ -698,8 +742,8 @@ public class WalletClient {
     }
     byte[] decodeData = new byte[decodeCheck.length - 4];
     System.arraycopy(decodeCheck, 0, decodeData, 0, decodeData.length);
-    byte[] hash0 = Hash.sha256(decodeData);
-    byte[] hash1 = Hash.sha256(hash0);
+    byte[] hash0 = Sha256Hash.hash(decodeData);
+    byte[] hash1 = Sha256Hash.hash(hash0);
     if (hash1[0] == decodeCheck[decodeData.length] &&
         hash1[1] == decodeCheck[decodeData.length + 1] &&
         hash1[2] == decodeCheck[decodeData.length + 2] &&
@@ -721,13 +765,13 @@ public class WalletClient {
     return address;
   }
 
-  public static boolean priKeyValid(String priKey) {
-    if (StringUtils.isEmpty(priKey)) {
+  public static boolean priKeyValid(byte[] priKey) {
+    if (ArrayUtils.isEmpty(priKey)) {
       logger.warn("Warning: PrivateKey is empty !!");
       return false;
     }
-    if (priKey.length() != 64) {
-      logger.warn("Warning: PrivateKey length need 64 but " + priKey.length() + " !!");
+    if (priKey.length != 32) {
+      logger.warn("Warning: PrivateKey length need 64 but " + priKey.length + " !!");
       return false;
     }
     //Other rule;
@@ -781,6 +825,10 @@ public class WalletClient {
     return rpcCli.getAssetIssueList();
   }
 
+  public static Optional<AssetIssueList> getAssetIssueList(long offset, long limit) {
+    return rpcCli.getAssetIssueList(offset, limit);
+  }
+
   public static Optional<NodeList> listNodes() {
     return rpcCli.listNodes();
   }
@@ -825,6 +873,10 @@ public class WalletClient {
 
   public static Optional<Transaction> getTransactionById(String txID) {
     return rpcCli.getTransactionById(txID);
+  }
+
+  public static Optional<TransactionInfo> getTransactionInfoById(String txID) {
+    return rpcCli.getTransactionInfoById(txID);
   }
 
   public boolean freezeBalance(long frozen_balance, long frozen_duration)
